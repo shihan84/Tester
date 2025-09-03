@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { writeFile } from 'fs/promises'
+import { writeFile, mkdir } from 'fs/promises'
 import { join } from 'path'
 import { v4 as uuidv4 } from 'uuid'
 
@@ -13,13 +13,29 @@ export async function POST(request: NextRequest) {
 
     if (!appFile || !deviceId || !userId) {
       return NextResponse.json(
-        { error: 'Missing required fields' },
+        { error: 'Missing required fields: appFile, deviceId, and userId are required' },
+        { status: 400 }
+      )
+    }
+
+    // Validate file size (100MB limit)
+    const maxSize = 100 * 1024 * 1024 // 100MB in bytes
+    if (appFile.size > maxSize) {
+      return NextResponse.json(
+        { error: 'File size too large. Maximum size is 100MB' },
         { status: 400 }
       )
     }
 
     // Validate file type
     const validExtensions = ['.apk', '.aab']
+    const validMimeTypes = [
+      'application/vnd.android.package-archive',
+      'application/octet-stream',
+      'application/vnd.android.package-archive',
+      'application/x-zip-compressed'
+    ]
+    
     const fileExtension = appFile.name.substring(appFile.name.lastIndexOf('.')).toLowerCase()
     
     if (!validExtensions.includes(fileExtension)) {
@@ -29,15 +45,36 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    if (!validMimeTypes.includes(appFile.type) && appFile.type !== '') {
+      console.warn(`Unexpected MIME type: ${appFile.type} for file: ${appFile.name}`)
+    }
+
     // Create uploads directory if it doesn't exist
     const uploadsDir = join(process.cwd(), 'uploads', 'apps')
+    try {
+      await mkdir(uploadsDir, { recursive: true })
+    } catch (error) {
+      console.error('Error creating uploads directory:', error)
+      // Continue even if directory creation fails - it might already exist
+    }
+
+    // Generate unique filename
     const fileName = `${uuidv4()}${fileExtension}`
     const filePath = join(uploadsDir, fileName)
 
     // Save the file
-    const bytes = await appFile.arrayBuffer()
-    const buffer = Buffer.from(bytes)
-    await writeFile(filePath, buffer)
+    try {
+      const bytes = await appFile.arrayBuffer()
+      const buffer = Buffer.from(bytes)
+      await writeFile(filePath, buffer)
+      console.log(`File saved successfully: ${filePath}`)
+    } catch (fileError) {
+      console.error('Error saving file:', fileError)
+      return NextResponse.json(
+        { error: 'Failed to save file to disk' },
+        { status: 500 }
+      )
+    }
 
     // Determine app type
     const appType = fileExtension === '.apk' ? 'ANDROID_APK' : 'ANDROID_AAB'
@@ -96,15 +133,18 @@ export async function POST(request: NextRequest) {
       }
     })
 
+    console.log(`Session created successfully: ${session.id}`)
+
     return NextResponse.json({
       session,
+      filePath: `/uploads/apps/${fileName}`,
       message: 'Android app uploaded successfully'
     })
 
   } catch (error) {
     console.error('Error uploading app:', error)
     return NextResponse.json(
-      { error: 'Failed to upload app' },
+      { error: `Failed to upload app: ${error instanceof Error ? error.message : 'Unknown error'}` },
       { status: 500 }
     )
   }

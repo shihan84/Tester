@@ -121,18 +121,24 @@ export default function Home() {
         body: formData
       })
 
-      if (!response.ok) throw new Error('Failed to upload app')
-
       const result = await response.json()
-      
+
+      if (!response.ok) {
+        throw new Error(result.error || 'Failed to upload app')
+      }
+
       // Reset form
       setSelectedAppFile(null)
       setSelectedDeviceId('')
       
       alert('Android app test session created successfully!')
+      
+      // Refresh sessions to show the new session
+      refetchSessions()
+      
     } catch (error) {
       console.error('Failed to create app test session:', error)
-      alert('Failed to create app test session')
+      alert(`Failed to create app test session: ${error instanceof Error ? error.message : 'Unknown error'}`)
     } finally {
       setIsCreating(false)
     }
@@ -150,18 +156,24 @@ export default function Home() {
     const file = event.target.files?.[0]
     if (file) {
       // Check if it's an Android app file
-      const validTypes = ['application/vnd.android.package-archive', 'application/octet-stream']
       const validExtensions = ['.apk', '.aab']
+      const fileExtension = file.name.substring(file.name.lastIndexOf('.')).toLowerCase()
       
-      const isValidType = validTypes.includes(file.type) || 
-                         validExtensions.some(ext => file.name.toLowerCase().endsWith(ext))
-      
-      if (isValidType) {
-        setSelectedAppFile(file)
-      } else {
+      if (!validExtensions.includes(fileExtension)) {
         alert('Please select a valid Android app file (.apk or .aab)')
         event.target.value = ''
+        return
       }
+
+      // Check file size (100MB limit)
+      const maxSize = 100 * 1024 * 1024 // 100MB in bytes
+      if (file.size > maxSize) {
+        alert('File size is too large. Maximum size is 100MB.')
+        event.target.value = ''
+        return
+      }
+
+      setSelectedAppFile(file)
     }
   }
 
